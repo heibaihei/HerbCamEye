@@ -6,7 +6,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    tools:context="com.lb377463323.camera1.MainActivity">
+    tools:context="com.herbCamEye.camera1.MainActivity">
 
     <TextureView
         android:id="@+id/camera_preview"

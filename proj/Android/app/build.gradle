@@ -4,7 +4,7 @@ android {
     compileSdkVersion 25
     buildToolsVersion "25.0.2"
     defaultConfig {
-        applicationId "com.lb377463323.camera1"
+        applicationId "com.herbCamEye.camera1"
         minSdkVersion 15
         targetSdkVersion 25
         versionCode 1
