@@ -22,7 +22,7 @@ import javax.microedition.khronos.egl.EGLSurface;
 public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final String TAG = "CameraGLRenderer";
     private Context mContext;
-    private HandlerThread mHandlerThread;
+    private HandlerThread mReanderThreadHandler = null;
     private Handler mHandler;
     private TextureView mTextureView;
     private int mOESTextureId;
@@ -40,15 +40,16 @@ public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener
     private static final int MSG_INIT = 1;
     private static final int MSG_RENDER = 2;
     private static final int MSG_DEINIT = 3;
-    private SurfaceTexture mOESSurfaceTexture;
+    private SurfaceTexture mOESSurfaceTexture = null;
 
-    public void init(TextureView textureView, int oesTextureId, Context context) {
+    public void initialRenderContext(TextureView textureView, int oesTextureId, Context context) {
         mContext = context;
         mTextureView = textureView;
         mOESTextureId = oesTextureId;
-        mHandlerThread = new HandlerThread("Renderer Thread");
-        mHandlerThread.start();
-        mHandler = new Handler(mHandlerThread.getLooper()){
+
+        mReanderThreadHandler = new HandlerThread("Renderer Thread");
+        mReanderThreadHandler.start();
+        mHandler = new Handler(mReanderThreadHandler.getLooper()) {
             @Override
             public void handleMessage(Message msg) {
                 switch (msg.what) {
@@ -71,21 +72,16 @@ public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener
     private void initEGL() {
         mEgl = (EGL10) EGLContext.getEGL();
 
-        //获取显示设备
         mEGLDisplay = mEgl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
         if (mEGLDisplay == EGL10.EGL_NO_DISPLAY) {
             throw new RuntimeException("eglGetDisplay failed! " + mEgl.eglGetError());
         }
 
-        //version中存放EGL版本号
         int[] version = new int[2];
-
-        //初始化EGL
         if (!mEgl.eglInitialize(mEGLDisplay, version)) {
             throw new RuntimeException("eglInitialize failed! " + mEgl.eglGetError());
         }
 
-        //构造需要的配置列表
         int[] attributes = {
                 EGL10.EGL_RED_SIZE, 8,
                 EGL10.EGL_GREEN_SIZE,8,
@@ -96,12 +92,12 @@ public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener
                 EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
                 EGL10.EGL_NONE
         };
-        int[] configsNum = new int[1];
 
-        //EGL选择配置
+        int[] configsNum = new int[1];
         if (!mEgl.eglChooseConfig(mEGLDisplay, attributes, mEGLConfig, 1, configsNum)) {
             throw new RuntimeException("eglChooseConfig failed! " + mEgl.eglGetError());
         }
+
         SurfaceTexture surfaceTexture = mTextureView.getSurfaceTexture();
         if (surfaceTexture == null)
             return;
@@ -130,32 +126,41 @@ public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener
     }
 
     private void drawFrame() {
-        long t1, t2;
-        t1 = System.currentTimeMillis();
+
         if (mOESSurfaceTexture != null) {
             mOESSurfaceTexture.updateTexImage();
             mOESSurfaceTexture.getTransformMatrix(transformMatrix);
         }
+
         mEgl.eglMakeCurrent(mEGLDisplay, mEglSurface, mEglSurface, mEGLContext);
-        GLES20.glViewport(0,0,mTextureView.getWidth(),mTextureView.getHeight());
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        GLES20.glClearColor(1f, 1f, 0f, 0f);
-        mFilterEngine.drawTexture(transformMatrix);
-        mEgl.eglSwapBuffers(mEGLDisplay, mEglSurface);
-        t2 = System.currentTimeMillis();
-        Log.i(TAG, "drawFrame: time = " + (t2 - t1));
+        glContextInitial(mTextureView.getWidth(), mTextureView.getHeight());
+        if (updateTexture() == true) {
+            mEgl.eglSwapBuffers(mEGLDisplay, mEglSurface);
+        }
     }
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        if (mHandler != null) {
+        if (mHandler != null) { /** SurfaceTexture 触发 onFrameAvailable 回调 */
             mHandler.sendEmptyMessage(MSG_RENDER);
         }
     }
 
-    public SurfaceTexture initOESTexture() {
+    public SurfaceTexture OESTextureInitial() {
         mOESSurfaceTexture = new SurfaceTexture(mOESTextureId);
         mOESSurfaceTexture.setOnFrameAvailableListener(this);
         return mOESSurfaceTexture;
+    }
+
+    private boolean updateTexture() {
+        if (mFilterEngine.drawTexture(transformMatrix) != true)
+            return false;
+        return true;
+    }
+
+    private void glContextInitial(int width, int height) {
+        GLES20.glViewport(0,0, width, height);
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        GLES20.glClearColor(1f, 1f, 0f, 0f);
     }
 }

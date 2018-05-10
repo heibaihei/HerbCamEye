@@ -60,7 +60,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private TextureView mTextureView;
     private int mCaptureWidth;
     private int mCaptureHeight;
-
+    /** 存放相机的纹理ID */
     private int mOESTextureId = -1;
     private SurfaceTexture mOESSurfaceTexture = null;
     private CameraGLRenderer mImageRenderer = null;
@@ -90,11 +90,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     protected void onResume() {
         super.onResume();
         CameraInitial(mCameraId);
-        initParameters();
-        initPopupWindow();
-        Log.i(TAG, " ["+Thread.currentThread().getStackTrace()[2].getFileName()+","
-                        +Thread.currentThread().getStackTrace()[2].getLineNumber()+"] onResume");
-        //
+        CommonInitial();
     }
 
     /** Check whether the device has a camera */
@@ -123,43 +119,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     //当SurfaceTexture可用时回调此方法，此时暂时用不到回调生成的surface，mOESSurfaceTexture内部处理surface
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        Log.i(TAG, " ["+Thread.currentThread().getStackTrace()[2].getFileName()+","
-                +Thread.currentThread().getStackTrace()[2].getLineNumber()+"] onSurfaceTextureAvailable");
-        //获取外部纹理ID
+
+        /** 获取外部纹理ID */
         mOESTextureId = Utils.createOESTextureObject();
-        //获取自定义的SurfaceTexture
-        mImageRenderer.init(mTextureView, mOESTextureId, MainActivity.this);
-        mOESSurfaceTexture = mImageRenderer.initOESTexture();
+        mImageRenderer.initialRenderContext(mTextureView, mOESTextureId, MainActivity.this);
+        mOESSurfaceTexture = mImageRenderer.OESTextureInitial();
 
         mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
-
-        //将摄像机出来预览帧先输入自定义mOESSurfaceTexture
         setPreviewTexture(mOESSurfaceTexture);
-        //这里注释掉将摄像头出来的流直接显示到mTextureView的surface
-        //setPreviewTexture(surface);
         setDisplayOrientation(90);
         startPreview();
-
-/*      //这里通过获取摄像机预览帧，处理后，通过框架实现方法重新画上去mTextureView,实验处理data 290ms；没有处理的时候14帧率；效率低。
-        mCamera.setPreviewCallback(new Camera.PreviewCallback() {
-            @Override
-            //摄像机有预览帧时候回调
-            public void onPreviewFrame(byte[] bytes, Camera camera) {
-
-            }
-        });
-*/
-
-        // 【调试】设置后的图片大小和预览大小、帧格式以及帧率
-        Camera.Size csize = mCamera.getParameters().getPreviewSize();
-        Log.i(TAG, "after setting, previewSize:width: " + csize.width + " height: " + csize.height);
-        csize = mCamera.getParameters().getPictureSize();
-        Log.i(TAG, "after setting, pictruesize:width: " + csize.width + " height: " + csize.height);
-        Log.i(TAG, "after setting, previewformate is " + mCamera.getParameters().getPreviewFormat());
-        int[] fps = new int[2];
-        mCamera.getParameters().getPreviewFpsRange(fps);
-        Log.i(TAG, "after setting, previewframetate is " + mCamera.getParameters().getPreviewFrameRate()
-                +" "+fps[0]+"-"+fps[1]);
     }
 
     @Override
@@ -216,7 +185,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             for (int j = 0; j < mPictureSizeList.size(); j++) {
                 Log.i(TAG, "picture size " + j + " :" + mPictureSizeList.get(j));
             }
-            initParameters();
+
             mPictureAdapter.notifyDataSetChanged();
             setDisplayOrientation(90);
             setPreviewTexture(mOESSurfaceTexture);
@@ -298,8 +267,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void setDisplayOrientation(int degree){
         if (mCamera != null) {
             mCamera.setDisplayOrientation(degree);
+            Log.i(TAG, "Set display orientation : " + degree);
         }
-        Log.i(TAG, "Set display orientation is : " + degree);
     }
 
     private void CameraInitial(int targetCameraID) {
@@ -307,8 +276,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             Log.e(TAG, "Camera open failed !");
         }
         else {
+            if (mCameraParameters == null)
+                mCameraParameters = getParameters();
+
             getSupportedPreviewSizes();
             getSupportedPictureSizes();
+
+            if (mSupportedPreSizeList != null && mSupportedPicSizeList != null) {
+                Camera.Size size = mSupportedPreSizeList.get((mSupportedPreSizeList.size() - 1));
+                mCameraParameters.setPreviewSize(size.width, size.height);
+                Log.i(TAG, "Work preview size paramter: " + size.width + "," + size.height);
+
+                size = mSupportedPicSizeList.get(mSupportedPicSizeList.size() - 1);
+                mCameraParameters.setPictureSize(size.width, size.height);
+                Log.i(TAG, "Work picture size paramter: " + size.width + "," + size.height);
+                setParameters();
+            }
         }
     }
 
@@ -337,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void stopPreview() {
         if (mCamera != null){
             mCamera.stopPreview();
-            Log.i(TAG, "Camera Preview has stopped!");
+            Log.i(TAG, "Camera preview stopped!");
         }
     }
 
@@ -347,7 +330,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             mCamera.setPreviewCallback(null);
             mCamera.release();
             mCamera = null;
-            Log.i(TAG, "Camera has closed!");
+            Log.i(TAG, "Camera closed!");
         }
     }
 
@@ -358,26 +341,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         closeCamera();
     }
 
-    private void initParameters() {
-        if (mSupportedPreSizeList != null && mSupportedPicSizeList != null) {
-            mCameraParameters.setPreviewSize(mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width,
-                    mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
-            Log.i(TAG, "initParameters: previewSize: " + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width +
-                    "," + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
-            
-            mCaptureWidth = mSupportedPicSizeList.get(mSupportedPicSizeList.size() - 1).width;
-            mCaptureHeight = mSupportedPicSizeList.get(mSupportedPicSizeList.size() - 1).height;
-            mCameraParameters.setPictureSize(mCaptureWidth, mCaptureHeight);
-            Log.i(TAG, "initParameters: pictureSize: " + mCaptureWidth + "," + mCaptureHeight);
-            setParameters();
-        }
-    }
+    private void CommonInitial() {
 
-    private void initPopupWindow() {
-        initPicturePopupWindow();
-    }
-
-    private void initPicturePopupWindow() {
         mPictureAdapter = new MyAdapter(mPictureSizeList);
         mPictureListView = new ListView(this);
         mPictureListView.setId(R.id.pictureId);
@@ -386,6 +351,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             mPicturePopupWindow = new PopupWindow(mPictureListView, 320, 320,true);
         }
         mPictureListView.setOnItemClickListener(this);
+
     }
 
     private void showPopupWindow(PopupWindow popupWindow, View view) {
@@ -397,38 +363,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             if (popupWindow != null) {
                 popupWindow.dismiss();
             }
-        }
-    }
-
-    class MyAdapter extends BaseAdapter {
-        List<String> sizeList = new ArrayList<>();
-
-        public MyAdapter(List<String> list) {
-            this.sizeList = list;
-        }
-
-        @Override
-        public int getCount() {
-            return sizeList.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return sizeList.get(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            TextView textView = new TextView(MainActivity.this);
-            textView.setTextSize(18);
-            textView.setTextColor(Color.rgb(255, 255, 0));
-            textView.setText(sizeList.get(position));
-            return textView;
         }
     }
 
@@ -535,6 +469,37 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             return true;
         } else {
             return false;
+        }
+    }
+
+    /** 子 View 控件 */
+    class MyAdapter extends BaseAdapter {
+        List<String> sizeList = new ArrayList<>();
+
+        public MyAdapter(List<String> list) { this.sizeList = list;}
+
+        @Override
+        public int getCount() {
+            return sizeList.size();
+        }
+
+        @Override
+        public Object getItem(int position) {
+            return sizeList.get(position);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            TextView textView = new TextView(MainActivity.this);
+            textView.setTextSize(18);
+            textView.setTextColor(Color.rgb(255, 255, 0));
+            textView.setText(sizeList.get(position));
+            return textView;
         }
     }
 }

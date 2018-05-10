@@ -126,7 +126,7 @@ public class FilterEngine {
     }
 
     //现在需要将顶点坐标和纹理坐标传输给Shader，在onDrawFrame方法中执行下述代码
-    public void drawTexture(float[] transformMatrix) {
+    public boolean drawTexture(float[] transformMatrix) {
         //获取Shader中定义的变量在program中的位置
         aPositionLocation = glGetAttribLocation(mShaderProgram, FilterEngine.POSITION_ATTRIBUTE);
         aTextureCoordLocation = glGetAttribLocation(mShaderProgram, FilterEngine.TEXTURE_COORD_ATTRIBUTE);
@@ -159,6 +159,7 @@ public class FilterEngine {
             //绘制两个三角形（6个顶点）
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }
+        return true;
     }
 
     public int getShaderProgram() {
