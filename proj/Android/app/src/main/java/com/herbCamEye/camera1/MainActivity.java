@@ -4,19 +4,14 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.ImageFormat;
 import android.graphics.Matrix;
-import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
-import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Process;
 import android.support.v7.app.AppCompatActivity;
-import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.TextureView;
@@ -30,7 +25,6 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -40,68 +34,62 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import javax.microedition.khronos.opengles.GL10;
-
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener, View.OnClickListener, AdapterView.OnItemClickListener{
     private String TAG = "MainActivity";
     public static final String STORAGE_PATH = Environment.getExternalStorageDirectory().toString();
 
-    private Camera mCamera;
-    private TextureView mTextureView;
-    private int mCameraId;
-    private int mCameraNum;
+
+    private Camera mCamera = null;
+    private int mCameraId = 0; /** 0默认为前置摄像头，1为后置摄像头 */
+    private int mCameraNum = 0;
+    private Camera.Parameters mCameraParameters = null;
+    private List<Camera.Size> mSupportedPreSizeList = null;
+    private List<Camera.Size> mSupportedPicSizeList = null;
+    private List<String> mPreviewSizeList = null;
+    private List<String> mPictureSizeList = null;
+
+
     private Button mCaptureButton;
     private Button mSwitchCamButton;
     private Button mPictureSizeButton;
     private PopupWindow mPreviewPopupWindow;
     private PopupWindow mPicturePopupWindow;
-    private Camera.Parameters mParameters;
-    private List<Camera.Size> mSupportedPreSizeList;
-    private List<Camera.Size> mSupportedPicSizeList;
-    private List<String> mPreviewSizeList;
-    private List<String> mPictureSizeList;
+
     private ListView mPictureListView;
     private MyAdapter mPictureAdapter;
+    private TextureView mTextureView;
     private int mCaptureWidth;
     private int mCaptureHeight;
 
-    //新增
-    private SurfaceTexture mOESSurfaceTexture;
     private int mOESTextureId = -1;
-    private CameraV1GLRenderer mRenderer;
+    private SurfaceTexture mOESSurfaceTexture = null;
+    private CameraGLRenderer mImageRenderer = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
         mTextureView = (TextureView) findViewById(R.id.camera_preview);
         mCaptureButton = (Button) findViewById(R.id.btn_capture);
         mSwitchCamButton = (Button) findViewById(R.id.btn_switchCam);
         mPictureSizeButton = (Button) findViewById(R.id.btn_pictureSize);
-        //监听控件
+        /** 设置控件监听对象 */
         mCaptureButton.setOnClickListener(this);
         mSwitchCamButton.setOnClickListener(this);
         mPictureSizeButton.setOnClickListener(this);
 
-        mRenderer = new CameraV1GLRenderer();
-        if(checkCameraHardware(this)){
-            mCameraNum = Camera.getNumberOfCameras();
-            Log.i(TAG, "Camera Number: " + mCameraNum);
-            //注册一个SurfaceTexture，用于监听SurfaceTexure准备好的信号
-            mTextureView.setSurfaceTextureListener(this);
 
-        }else {
-            Log.i(TAG, "Has not Camera!");
+        mImageRenderer = new CameraGLRenderer();
+        if(checkCameraHardware(this)) {
+            mTextureView.setSurfaceTextureListener(this);
         }
-        Log.i(TAG, " ["+Thread.currentThread().getStackTrace()[2].getFileName()+","
-                +Thread.currentThread().getStackTrace()[2].getLineNumber()+"] onCreate");
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        requestCamera(mCameraId);
-        initSizeList();
+        CameraInitial(mCameraId);
         initParameters();
         initPopupWindow();
         Log.i(TAG, " ["+Thread.currentThread().getStackTrace()[2].getFileName()+","
@@ -109,12 +97,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         //
     }
 
-    //Check whether the device has a camera
+    /** Check whether the device has a camera */
     private boolean checkCameraHardware(Context context){
-        if(context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA)){
-            return true;//has Camera
-        }else {
-            return false;// has not Camera
+        if(context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA)) {
+            mCameraNum = Camera.getNumberOfCameras();
+            return true;
+        }
+        else {
+            Log.i(TAG,  "There's not camera exist !");
+            return false;
         }
     }
 
@@ -137,8 +128,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         //获取外部纹理ID
         mOESTextureId = Utils.createOESTextureObject();
         //获取自定义的SurfaceTexture
-        mRenderer.init(mTextureView, mOESTextureId, MainActivity.this);
-        mOESSurfaceTexture = mRenderer.initOESTexture();
+        mImageRenderer.init(mTextureView, mOESTextureId, MainActivity.this);
+        mOESSurfaceTexture = mImageRenderer.initOESTexture();
 
         mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
 
@@ -217,8 +208,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             stopPreview();
             closeCamera();
 
-            requestCamera(mCameraId);
-            initSizeList();
+            CameraInitial(mCameraId);
             for (int i = 0; i < mPreviewSizeList.size(); i++) {
                 Log.i(TAG, "preview size " + i + " :" + mPreviewSizeList.get(i));
             }
@@ -312,19 +302,27 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         Log.i(TAG, "Set display orientation is : " + degree);
     }
 
-    private void requestCamera(int mCameraId) {
-        openCamera(mCameraId);
+    private void CameraInitial(int targetCameraID) {
+        if (openCamera(targetCameraID) != true) {
+            Log.e(TAG, "Camera open failed !");
+        }
+        else {
+            getSupportedPreviewSizes();
+            getSupportedPictureSizes();
+        }
     }
 
-    private void openCamera(int cameraId){
-        try{
+    private boolean openCamera(int targetCameraID){
+        try {
             if (mCamera == null) {
-                mCamera = Camera.open(cameraId);
-                Log.i(TAG, "Camera has opened, cameraId is " + cameraId);
+                mCamera = Camera.open(targetCameraID);
+                Log.i(TAG, "Camera open success, CameraID:" + targetCameraID);
+                return true;
             }
-        }catch (Exception e){
-            Log.e(TAG, "Open Camera has exception!");
+        } catch (Exception e) {
+            Log.e(TAG, "Camera open occur exception !");
         }
+        return false;
     }
 
     private void startPreview(){
@@ -360,22 +358,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         closeCamera();
     }
 
-    private void initSizeList() {
-        mParameters = getParameters();
-        mSupportedPreSizeList = getSupportedPreviewSizes(mParameters);
-        mSupportedPicSizeList = getSupportedPictureSizes(mParameters);
-    }
-
     private void initParameters() {
         if (mSupportedPreSizeList != null && mSupportedPicSizeList != null) {
-            mParameters.setPreviewSize(mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width,
+            mCameraParameters.setPreviewSize(mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width,
                     mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
             Log.i(TAG, "initParameters: previewSize: " + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width +
                     "," + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
             
             mCaptureWidth = mSupportedPicSizeList.get(mSupportedPicSizeList.size() - 1).width;
             mCaptureHeight = mSupportedPicSizeList.get(mSupportedPicSizeList.size() - 1).height;
-            mParameters.setPictureSize(mCaptureWidth, mCaptureHeight);
+            mCameraParameters.setPictureSize(mCaptureWidth, mCaptureHeight);
             Log.i(TAG, "initParameters: pictureSize: " + mCaptureWidth + "," + mCaptureHeight);
             setParameters();
         }
@@ -441,19 +433,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     private Camera.Parameters getParameters() {
-        if (mCamera != null) {
+        if (mCamera != null)
             return mCamera.getParameters();
-        }
         return null;
     }
 
     private void setParameters() {
-        if(mCamera != null && mParameters != null) {
-            mCamera.setParameters(mParameters);
+        if(mCamera != null && mCameraParameters != null) {
+            mCamera.setParameters(mCameraParameters);
         }
     }
 
-    private List<Camera.Size> getSupportedPreviewSizes(Camera.Parameters parameters) {
+    private List<Camera.Size> getSupportedPreviewSizes() {
+        Camera.Parameters parameters = getParameters();
         if (parameters == null) {
             return null;
         }
@@ -466,6 +458,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         for (Camera.Size size : parameters.getSupportedPreviewSizes()) {
             if (equalsRate(size, 1.777f)) {
                 mSupportedPreSizeList.add(size);
+                Log.i(TAG,  "Support [16:9] Preview size: " + size.width + " × " + size.height);
             }
         }
         for (Camera.Size size : mSupportedPreSizeList) {
@@ -475,7 +468,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
 
-    private List<Camera.Size> getSupportedPictureSizes(Camera.Parameters parameters) {
+    private List<Camera.Size> getSupportedPictureSizes() {
+        Camera.Parameters parameters = getParameters();
         if (parameters == null) {
             return null;
         }
@@ -488,6 +482,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         for (Camera.Size size : parameters.getSupportedPictureSizes()) {
             if(equalsRate(size, 1.777f)) {
                 mSupportedPicSizeList.add(size);
+                Log.i(TAG,  "Support [16:9] Picture size: " + size.width + " × " + size.height);
             }
         }
         for (Camera.Size size : mSupportedPicSizeList) {
@@ -511,8 +506,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     private void setPreviewSize(float rate) {
-        if (!equalsRate(mParameters.getPreviewSize(), rate)) {
-            mParameters.setPreviewSize(mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width,
+        if (!equalsRate(mCameraParameters.getPreviewSize(), rate)) {
+            mCameraParameters.setPreviewSize(mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width,
                     mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
             Log.i(TAG, "setPreviewSize: changed: " + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).width +
                     "×" + mSupportedPreSizeList.get(mSupportedPreSizeList.size() - 1).height);
@@ -527,7 +522,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void setCaptureSize(int captureWidth, int captureHeight) {
         this.mCaptureWidth = captureWidth;
         this.mCaptureHeight = captureHeight;
-        mParameters.setPictureSize(mCaptureWidth, mCaptureHeight);
+        mCameraParameters.setPictureSize(mCaptureWidth, mCaptureHeight);
         if (mCamera != null) {
             setParameters();
         }

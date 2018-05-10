@@ -19,8 +19,8 @@ import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.egl.EGLSurface;
 
 
-public class CameraV1GLRenderer implements SurfaceTexture.OnFrameAvailableListener {
-    private static final String TAG = "Filter_GLRenderer";
+public class CameraGLRenderer implements SurfaceTexture.OnFrameAvailableListener {
+    private static final String TAG = "CameraGLRenderer";
     private Context mContext;
     private HandlerThread mHandlerThread;
     private Handler mHandler;
